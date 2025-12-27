@@ -6,7 +6,7 @@ import numpy as np
 import csv
 
 # Load latest CSV
-csv_path = '/home/onurs/edge_ai_web/ppg_web/outputs/session_20251225_000821.csv'
+csv_path = '/home/onurs/edge_ai_web/ppg_web/outputs/session.csv'
 ir = []
 with open(csv_path, 'r') as f:
     r = csv.reader(f)

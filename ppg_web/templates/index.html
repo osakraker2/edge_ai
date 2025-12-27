@@ -87,30 +87,12 @@
               <div>Çıktı</div><div id="out">-</div>
               <div>Nabız CSV</div><div id="nabiz">-</div>
             </div>
-          </div>
-          <div class="col">
-            <div class="charts">
-              <div class="mini">
-                <div class="pill">Grafik 2</div>
-                <canvas id="p2"></canvas>
-              </div>
-              <div class="mini">
-                <div class="pill">Grafik 3</div>
-                <canvas id="p3"></canvas>
-              </div>
-              <div class="mini">
-                <div class="pill">Grafik 4</div>
-                <canvas id="p4"></canvas>
-              </div>
-              <div class="mini">
-                <div class="pill">Grafik 5</div>
-                <canvas id="p5"></canvas>
-              </div>
-              <div class="mini">
-                <div class="pill">Grafik 6</div>
-                <canvas id="p6"></canvas>
-              </div>
+
+            <div style="margin-top: 12px; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03);">
+              <canvas id="ppg_main_chart" style="height: 270px !important;"></canvas>
             </div>
+
+            <div id="ppg_footer" class="desc" style="margin-top: 10px; opacity: .95;"></div>
           </div>
         </div>
       </div>
@@ -520,14 +502,55 @@
       }
     }
 
-    const placeholderIds = ['p2','p3','p4','p5','p6'];
-    for (const id of placeholderIds) {
-      const c = document.getElementById(id).getContext('2d');
-      new Chart(c, {
+    // PPG Kayıt tek grafik - canlı veri /ppg_live
+    let ppgMainChart = null;
+    (function initPpgMainChart() {
+      const el = document.getElementById('ppg_main_chart');
+      if (!el) return;
+      const c = el.getContext('2d');
+      ppgMainChart = new Chart(c, {
         type: 'line',
-        data: { labels: Array(40).fill(''), datasets: [{ data: Array(40).fill(0), borderColor: 'rgba(255,255,255,0.20)', borderWidth: 1, pointRadius: 0, tension: 0.2 }] },
-        options: { scales: { y: { display:false }, x: { display:false } }, animation: false, plugins: { legend: { display: false } } }
+        data: {
+          labels: Array(400).fill(''),
+          datasets: [{
+            data: Array(400).fill(0),
+            borderColor: 'rgba(0,212,255,0.80)',
+            borderWidth: 1,
+            pointRadius: 0,
+            tension: 0.15,
+          }]
+        },
+        options: {
+          scales: { y: { display:false }, x: { display:false } },
+          animation: false,
+          plugins: { legend: { display: false } }
+        }
       });
+    })();
+
+    function updatePpgMainChart(series) {
+      if (!ppgMainChart) return;
+      const n = ppgMainChart.data.datasets[0].data.length;
+      const padded = Array(Math.max(0, n - series.length)).fill(series.length ? series[0] : 0).concat(series.slice(-n));
+      ppgMainChart.data.datasets[0].data = padded;
+      ppgMainChart.update('none');
+    }
+
+    let lastLiveFetchAt = 0;
+    async function tickPpgLive() {
+      const now = Date.now();
+      if (now - lastLiveFetchAt < 250) return;
+      lastLiveFetchAt = now;
+      try {
+        const r = await fetch('/ppg_live');
+        const d = await r.json();
+        if (!d || d.status !== 'ok') return;
+
+        // Tek grafik: IR
+        updatePpgMainChart((d.ir ?? []).map(Number));
+      } catch (e) {
+        // ignore
+      }
     }
 
     // Tabs (Sol-alt)
@@ -588,6 +611,9 @@
         const r = await fetch('/status');
         const d = await r.json();
 
+        // PPG mini grafikler
+        tickPpgLive();
+
         document.getElementById('status').innerText = d.message || '';
         document.getElementById('ir').innerText = d.ir ?? 0;
         document.getElementById('red').innerText = d.red ?? 0;
@@ -597,6 +623,12 @@
         document.getElementById('samples').innerText = d.samples_written ?? 0;
         document.getElementById('out').innerText = d.output_path ?? '-';
         document.getElementById('nabiz').innerText = d.nabiz_path ?? '-';
+
+        const footer = document.getElementById('ppg_footer');
+        if (footer) {
+          if (d.phase === 'DONE' && d.output_path) footer.innerText = 'Ham veriler hazırlanıyor • ' + d.output_path;
+          else footer.innerText = '';
+        }
 
         const fill = document.getElementById('fill');
         const main = document.getElementById('main');
@@ -619,7 +651,7 @@
           if (doneAt === null) doneAt = Date.now();
           const dt = Date.now() - doneAt;
           if (dt >= 5000) {
-            sub.innerText = 'Ham veriler hazırlanıyor • ' + (d.output_path ?? '-');
+            sub.innerText = 'Kayıt tamamlandı';
             loadRawOnce();
           } else {
             sub.innerText = 'Kayıt tamamlandı • Parmağınızı sensörden çekiniz';

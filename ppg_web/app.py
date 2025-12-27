@@ -6,6 +6,8 @@ import threading
 import numpy as np
 from collections import deque
 
+from scipy.signal import butter, filtfilt, detrend, find_peaks
+
 from max30102 import MAX30102
 from pan_tompkins import PanTompkins
 
@@ -49,6 +51,7 @@ BPM_MAX = 110.0
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 NABIZ_CSV_PATH = os.path.join(OUTPUT_DIR, "nabiz.csv")
+SESSION_CSV_PATH = os.path.join(OUTPUT_DIR, "session.csv")
 
 PT_PLOTS_DIR = os.path.join(BASE_DIR, "pan_tompkins", "plots")
 PLOTS_DIR = os.path.join(BASE_DIR, "plots")
@@ -77,6 +80,7 @@ _state = {
 
 _finger_window = deque(maxlen=FINGER_STABLE_SAMPLES)
 _ir_window = deque(maxlen=int(SAMPLE_HZ * 10))
+_red_window = deque(maxlen=int(SAMPLE_HZ * 10))
 _last_bpm_write_at = 0.0
 _last_bpm_compute_at = 0.0
 _bpm_ema = None
@@ -144,8 +148,7 @@ def _reset_session_locked() -> None:
 
 def _start_recording_locked() -> None:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    ts = time.strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(OUTPUT_DIR, f"session_{ts}.csv")
+    path = SESSION_CSV_PATH
 
     _cleanup_outputs_locked(keep_session_path=path)
     _reset_nabiz_csv_locked()
@@ -211,8 +214,8 @@ def _estimate_bpm_from_ir_window(ir_values, fs: float, prev_bpm: float | None):
     if energy <= 0:
         return None, 0.0
 
-    bpm_min = BPM_MIN
-    bpm_max = BPM_MAX
+    bpm_min = float(BPM_MIN)
+    bpm_max = float(BPM_MAX)
     lag_min = int(fs * 60.0 / bpm_max)
     lag_max = int(fs * 60.0 / bpm_min)
     lag_min = max(lag_min, 2)
@@ -304,6 +307,59 @@ def _estimate_bpm_from_ir_window(ir_values, fs: float, prev_bpm: float | None):
     return int(round(bpm)), float(quality)
 
 
+def _estimate_bpm_peak_based(ir_values, fs: float) -> tuple[int | None, float]:
+    n = len(ir_values)
+    if n < int(fs * 6):
+        return None, 0.0
+
+    x = np.asarray(ir_values, dtype=float)
+    x = detrend(x)
+
+    nyq = 0.5 * fs
+    low = 0.7 / nyq
+    high = 4.0 / nyq
+    if high >= 1.0:
+        high = 0.99
+    if low <= 0.0:
+        low = 0.01
+    if low >= high:
+        return None, 0.0
+
+    b, a = butter(2, [low, high], btype="band")
+    y = filtfilt(b, a, x)
+
+    # peak distance based on plausible max BPM
+    bpm_min = float(BPM_MIN)
+    bpm_max = float(BPM_MAX)
+
+    bpm_max = max(35.0, min(220.0, bpm_max))
+    min_dist = int(max(1, round(fs * 60.0 / bpm_max)))
+    # Basic adaptive threshold via prominence
+    prom = float(np.std(y) * 0.6)
+    if prom <= 0:
+        return None, 0.0
+
+    peaks, props = find_peaks(y, distance=min_dist, prominence=prom)
+    if peaks is None or len(peaks) < 3:
+        return None, 0.0
+
+    rr = np.diff(peaks) / float(fs)
+    rr = rr[(rr > 0.35) & (rr < 1.6)]
+    if len(rr) < 2:
+        return None, 0.0
+
+    bpm = 60.0 / float(np.median(rr))
+    if bpm < bpm_min or bpm > bpm_max:
+        return None, 0.0
+
+    # quality: more peaks + stable RR => higher
+    rr_cv = float(np.std(rr) / (np.mean(rr) + 1e-9))
+    q_peaks = min(1.0, len(rr) / 6.0)
+    q_rr = max(0.0, 1.0 - min(1.0, rr_cv / 0.25))
+    quality = 0.55 * q_peaks + 0.45 * q_rr
+    return int(round(bpm)), float(quality)
+
+
 def _smooth_bpm(raw_bpm: int):
     global _bpm_ema
     if raw_bpm is None:
@@ -369,52 +425,30 @@ def _reset_nabiz_csv_locked() -> None:
 
 
 def _cleanup_outputs_locked(keep_session_path: str | None) -> None:
-    # outputs altında sadece iki dosya kalsın: nabiz.csv ve en son session_*.csv
+    # outputs altında sadece iki dosya kalsın: nabiz.csv ve session.csv
     try:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         for name in os.listdir(OUTPUT_DIR):
-            path = os.path.join(OUTPUT_DIR, name)
-            if not os.path.isfile(path):
+            p = os.path.join(OUTPUT_DIR, name)
+            if not os.path.isfile(p):
                 continue
-            if path == NABIZ_CSV_PATH:
+            if name == "nabiz.csv":
                 continue
-            if keep_session_path is not None and path == keep_session_path:
+            if keep_session_path and os.path.abspath(p) == os.path.abspath(keep_session_path):
                 continue
-            if name.startswith("session_") and name.endswith(".csv"):
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
-            else:
-                # diğer tüm dosyaları da temizle
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
+            try:
+                os.remove(p)
+            except Exception:
+                pass
     except Exception:
-        return
+        pass
 
 
 def _get_latest_session_path() -> str | None:
-    try:
-        if not os.path.isdir(OUTPUT_DIR):
-            return None
-        best = None
-        best_mtime = None
-        for name in os.listdir(OUTPUT_DIR):
-            if not (name.startswith("session_") and name.endswith(".csv")):
-                continue
-            path = os.path.join(OUTPUT_DIR, name)
-            try:
-                mtime = os.path.getmtime(path)
-            except Exception:
-                continue
-            if best is None or (best_mtime is not None and mtime > best_mtime) or best_mtime is None:
-                best = path
-                best_mtime = mtime
-        return best
-    except Exception:
-        return None
+    if os.path.isfile(SESSION_CSV_PATH):
+        return SESSION_CSV_PATH
+    return None
+
 
 
 def _append_bpm_csv(now: float, bpm: int) -> None:
@@ -540,9 +574,12 @@ def _worker_loop() -> None:
             _state["last_sample_at"] = now
 
             _ir_window.append(ir)
+            _red_window.append(red)
             # BPM hesaplamasını her örnekte değil ~1Hz yap (25Hz'i tutturmak için)
             if (now - _last_bpm_compute_at) >= 1.0:
-                bpm_raw, q = _estimate_bpm_from_ir_window(list(_ir_window), SAMPLE_HZ, _last_bpm_valid)
+                bpm_raw, q = _estimate_bpm_peak_based(list(_ir_window), SAMPLE_HZ)
+                if bpm_raw is None:
+                    bpm_raw, q = _estimate_bpm_from_ir_window(list(_ir_window), SAMPLE_HZ, _last_bpm_valid)
                 _state["bpm_raw"] = bpm_raw
                 _state["bpm_quality"] = float(q)
                 bpm = _update_bpm_estimate(_state["phase"], bpm_raw, float(q))
@@ -953,6 +990,25 @@ def status():
             output_path=_state["output_path"],
             nabiz_path=NABIZ_CSV_PATH,
         )
+
+
+@app.route("/ppg_live")
+def ppg_live():
+    _ensure_worker_started()
+    with _state_lock:
+        ir = list(_ir_window)
+        red = list(_red_window)
+        bpm = _state.get("bpm")
+        bpm_raw = _state.get("bpm_raw")
+        bpm_quality = _state.get("bpm_quality")
+
+    # keep last ~4 seconds for UI
+    keep = int(SAMPLE_HZ * 4)
+    if keep > 0:
+        ir = ir[-keep:]
+        red = red[-keep:]
+
+    return jsonify(status="ok", fs=SAMPLE_HZ, ir=ir, red=red, bpm=bpm, bpm_raw=bpm_raw, bpm_quality=bpm_quality)
 
 
 @app.route("/restart")
