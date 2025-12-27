@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Edge AI - PPG Capture</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    html, body { height: 100%; }
+    body { background: #06070a; color: #e7eef7; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 0; overflow: hidden; }
+    .wrap { height: 100vh; width: 100vw; padding: 14px; box-sizing: border-box; }
+    .grid { height: 100%; width: 100%; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 14px; }
+    .card { height: 100%; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 18px; padding: 16px; box-shadow: 0 30px 80px rgba(0,0,0,0.45); box-sizing: border-box; overflow: hidden; }
+    .row { display: flex; gap: 14px; height: 100%; }
+    .col { flex: 1; min-width: 0; }
+    .charts { display: grid; gap: 10px; }
+    h1 { font-size: 20px; margin: 0 0 14px; font-weight: 700; letter-spacing: .3px; }
+    .status { font-size: 18px; color: #b9c7d8; min-height: 26px; }
+    .big { font-size: 64px; font-weight: 800; margin: 10px 0 0; letter-spacing: 1px; }
+    .sub { color: #88a3bf; margin-top: 6px; }
+    .pill { display: inline-block; padding: 6px 10px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(255,255,255,0.10); color: #cfe3ff; }
+    .bar { width: 100%; height: 10px; background: rgba(255,255,255,0.07); border-radius: 999px; overflow: hidden; margin-top: 14px; }
+    .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #00d4ff, #3cff7a); transition: width .15s linear; }
+    .kv { display: grid; grid-template-columns: 160px 1fr; gap: 10px; margin-top: 12px; font-size: 14px; color: #b9c7d8; }
+    .highlight { margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: rgba(0,212,255,0.10); border: 1px solid rgba(0,212,255,0.22); }
+    .highlight .label { font-size: 12px; color: #9cc9d6; letter-spacing: .3px; }
+    .highlight .value { font-size: 34px; font-weight: 800; margin-top: 4px; }
+    canvas { width: 100% !important; }
+    .chart-tall canvas { height: 260px !important; }
+    .chart-mid canvas { height: 200px !important; }
+    .mini canvas { height: 120px !important; }
+    a { color: #8fe1ff; text-decoration: none; }
+    .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+    .tab { padding: 7px 10px; border-radius: 999px; font-size: 12px; cursor: pointer; border: 1px solid rgba(255,255,255,0.10); color: #cfe3ff; background: rgba(255,255,255,0.04); user-select: none; }
+    .tab.active { border-color: rgba(0,212,255,0.55); background: rgba(0,212,255,0.12); }
+    .tab-content { flex: 1; min-height: 0; }
+    .tab-pane { height: 100%; display: none; }
+    .tab-pane.active { display: block; }
+    .vstack { display: flex; flex-direction: column; height: 100%; }
+    .fit-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+    .kpi-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .kpi { border-radius: 14px; padding: 12px 12px; border: 1px solid rgba(255,255,255,0.10); background: rgba(255,255,255,0.03); }
+    .kpi .k { font-size: 12px; color: #9cc9d6; letter-spacing: .3px; }
+    .kpi .v { font-size: 22px; font-weight: 800; margin-top: 6px; }
+    .badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; font-weight: 800; letter-spacing: .4px; }
+    .badge.good { background: rgba(60,255,122,0.14); border: 1px solid rgba(60,255,122,0.35); color: #b8ffd1; }
+    .badge.warn { background: rgba(255,183,3,0.14); border: 1px solid rgba(255,183,3,0.35); color: #ffe2a3; }
+    .badge.bad { background: rgba(255,73,100,0.14); border: 1px solid rgba(255,73,100,0.35); color: #ffd0d8; }
+    .badge.muted { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10); color: #cfe3ff; }
+
+    .gauge-wrap { display:flex; align-items:center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+    .gauge { width: 104px; height: 104px; border-radius: 50%; background: conic-gradient(#00d4ff 0deg, #3cff7a 120deg, rgba(255,255,255,0.10) 0deg); position: relative; border: 1px solid rgba(255,255,255,0.10); }
+    .gauge::after { content: ""; position:absolute; inset: 10px; border-radius: 50%; background: #06070a; border: 1px solid rgba(255,255,255,0.08); }
+    .gauge .gauge-text { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; z-index:1; }
+    .gauge .gauge-text .p { font-size: 22px; font-weight: 900; }
+    .gauge .gauge-text .l { font-size: 11px; color:#9cc9d6; margin-top: 2px; }
+    .desc { color:#88a3bf; font-size: 13px; line-height: 1.25; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="grid">
+      <div class="card" id="panel_lt">
+        <div class="panel-title">
+          <h1>PPG Kayıt</h1>
+        </div>
+        <div class="row">
+          <div class="col">
+            <div class="status" id="status">Parmağınızı lütfen sensöre koyun</div>
+            <div class="big" id="main">--</div>
+            <div class="sub" id="sub">Bekleniyor</div>
+            <div class="bar"><div class="fill" id="fill"></div></div>
+
+            <div class="highlight">
+              <div class="label">Ortalama Nabız (kayıt sonrası)</div>
+              <div class="value" id="bpm_avg">--</div>
+            </div>
+
+            <div class="kv">
+              <div>IR</div><div id="ir">0</div>
+              <div>RED</div><div id="red">0</div>
+              <div>Nabız</div><div id="bpm">-</div>
+              <div>Oturma Süresi</div><div id="settle">-</div>
+              <div>Örnek</div><div id="samples">0</div>
+              <div>Çıktı</div><div id="out">-</div>
+              <div>Nabız CSV</div><div id="nabiz">-</div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="charts">
+              <div class="mini">
+                <div class="pill">Grafik 2</div>
+                <canvas id="p2"></canvas>
+              </div>
+              <div class="mini">
+                <div class="pill">Grafik 3</div>
+                <canvas id="p3"></canvas>
+              </div>
+              <div class="mini">
+                <div class="pill">Grafik 4</div>
+                <canvas id="p4"></canvas>
+              </div>
+              <div class="mini">
+                <div class="pill">Grafik 5</div>
+                <canvas id="p5"></canvas>
+              </div>
+              <div class="mini">
+                <div class="pill">Grafik 6</div>
+                <canvas id="p6"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card vstack" id="panel_rt">
+        <div class="panel-title">
+          <h1>Pan‑Tompkins</h1>
+          <button onclick="runPanTompkins()" style="background: linear-gradient(90deg, #00d4ff, #3cff7a); border: none; color: #06070a; padding: 8px 14px; border-radius: 999px; font-weight: 600; cursor: pointer;">Analizi Çalıştır</button>
+        </div>
+        <div class="status" id="pt_status" style="margin-bottom: 10px;">Analiz bekleniyor</div>
+        <div class="tabs" id="pt_tabs">
+          <div class="tab active" data-tab="detrended">DETREND</div>
+          <div class="tab" data-tab="filtered">FILTERED</div>
+          <div class="tab" data-tab="derivative">DERIVATIVE</div>
+          <div class="tab" data-tab="squared">SQUARED</div>
+          <div class="tab" data-tab="integrated">INTEGRATED</div>
+          <div class="tab" data-tab="final">FINAL</div>
+        </div>
+        <div class="tab-content">
+          <div class="tab-pane active" id="pt_pane_detrended"><img id="pt_img_detrended" class="fit-img" /></div>
+          <div class="tab-pane" id="pt_pane_filtered"><img id="pt_img_filtered" class="fit-img" /></div>
+          <div class="tab-pane" id="pt_pane_derivative"><img id="pt_img_derivative" class="fit-img" /></div>
+          <div class="tab-pane" id="pt_pane_squared"><img id="pt_img_squared" class="fit-img" /></div>
+          <div class="tab-pane" id="pt_pane_integrated"><img id="pt_img_integrated" class="fit-img" /></div>
+          <div class="tab-pane" id="pt_pane_final"><img id="pt_img_final" class="fit-img" /></div>
+        </div>
+      </div>
+
+      <div class="card vstack" id="panel_lb">
+        <div class="panel-title">
+          <h1>Ham + Nabız Sinyali</h1>
+          <button id="csvAnalyzeBtn" onclick="startCsvAnalysis()" style="background: linear-gradient(90deg, #00d4ff, #3cff7a); border: none; color: #06070a; padding: 8px 14px; border-radius: 999px; font-weight: 600; cursor: pointer;">CSV'leri Analiz Et</button>
+        </div>
+        <div class="status" id="csv_status" style="margin-top: 8px; margin-bottom: 2px;">Analiz bekleniyor</div>
+        <div class="tabs" id="lb_tabs" style="margin-top: 6px;">
+          <div class="tab active" data-tab="ham">HAM</div>
+          <div class="tab" data-tab="nabiz">NABIZ</div>
+        </div>
+        <div class="tab-content">
+          <div class="tab-pane active" id="lb_pane_ham"><img id="img_session_raw" class="fit-img" /></div>
+          <div class="tab-pane" id="lb_pane_nabiz"><img id="img_nabiz" class="fit-img" /></div>
+        </div>
+      </div>
+
+      <div class="card vstack" id="panel_rb">
+        <div class="panel-title">
+          <h1>Yapay Zeka</h1>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button id="arrTrainBtn" onclick="startArrTrain()" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #e7eef7; padding: 8px 12px; border-radius: 999px; font-weight: 600; cursor: pointer;">MITDB Model Eğit</button>
+            <button id="arrScoreBtn" onclick="startArrScore()" style="background: linear-gradient(90deg, #00d4ff, #3cff7a); border: none; color: #06070a; padding: 8px 12px; border-radius: 999px; font-weight: 600; cursor: pointer;">Session Skorla</button>
+          </div>
+        </div>
+        <div class="tabs" id="ai_tabs" style="margin-top: 10px;">
+          <div class="tab active" data-tab="genel">GENEL</div>
+          <div class="tab" data-tab="rapor">RAPOR</div>
+        </div>
+        <div class="tab-content">
+          <div class="tab-pane active" id="ai_pane_genel">
+            <div style="display:flex; align-items:center; justify-content: space-between; gap: 10px;">
+              <div class="status" id="ai_status">Hazır</div>
+              <div class="badge muted" id="ai_badge">BEKLENİYOR</div>
+            </div>
+
+            <div class="gauge-wrap">
+              <div class="gauge" id="ai_gauge">
+                <div class="gauge-text">
+                  <div class="p" id="ai_risk_pct">--%</div>
+                  <div class="l">RİSK</div>
+                </div>
+              </div>
+              <div style="flex:1; min-width:0;">
+                <div style="font-size: 34px; font-weight: 900; margin-top: 2px;" id="ai_result">--</div>
+                <div class="desc" id="ai_note">Analiz için "Session Skorla" butonuna bas.</div>
+              </div>
+            </div>
+
+            <div class="kpi-grid">
+              <div class="kpi">
+                <div class="k">Model</div>
+                <div class="v" id="ai_model">-</div>
+              </div>
+              <div class="kpi">
+                <div class="k">Güven</div>
+                <div class="v" id="ai_conf">-</div>
+              </div>
+              <div class="kpi">
+                <div class="k">Toplam Bölge</div>
+                <div class="v" id="ai_total_windows">-</div>
+              </div>
+              <div class="kpi">
+                <div class="k">Riskli Bölge</div>
+                <div class="v" id="ai_risky_windows">-</div>
+              </div>
+            </div>
+          </div>
+          <div class="tab-pane" id="ai_pane_rapor" style="height:100%; display:flex; flex-direction:column;">
+            <div class="highlight" style="margin-top: 0;">
+              <div class="label">AI Sağlık Raporu</div>
+              <div class="value" id="ai_report_title" style="font-size: 28px;">--</div>
+              <div class="kv" style="margin-top: 10px;">
+                <div>Toplam Analiz Bölgesi</div><div id="ai_report_total">--</div>
+                <div>Tespit Edilen Riskli Bölge</div><div id="ai_report_risky">--</div>
+                <div>Sonuç</div><div id="ai_report_conclusion">--</div>
+              </div>
+            </div>
+            <div style="margin-top: 12px; flex:1; min-height: 0; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03);">
+              <img id="ai_report_img" class="fit-img" style="display:none;" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let csvAnalysisPolling = null;
+    let csvImagesReady = false;
+
+    function setCsvImages(plots) {
+      const ts = Date.now();
+      const s = document.getElementById('img_session_raw');
+      const n = document.getElementById('img_nabiz');
+      if (s && plots?.session_raw) s.src = plots.session_raw + '?t=' + ts;
+      if (n && plots?.nabiz) n.src = plots.nabiz + '?t=' + ts;
+      csvImagesReady = true;
+    }
+
+    // Tabs (AI)
+    const aiTabContainer = document.getElementById('ai_tabs');
+    if (aiTabContainer) {
+      aiTabContainer.addEventListener('click', (e) => {
+        const t = e.target;
+        if (!t.classList.contains('tab')) return;
+        const key = t.getAttribute('data-tab');
+        for (const el of aiTabContainer.querySelectorAll('.tab')) el.classList.remove('active');
+        t.classList.add('active');
+        const panes = {
+          genel: 'ai_pane_genel',
+          rapor: 'ai_pane_rapor',
+        };
+        for (const paneId of Object.values(panes)) document.getElementById(paneId).classList.remove('active');
+        document.getElementById(panes[key]).classList.add('active');
+      });
+    }
+
+    let arrTrainPolling = null;
+    let arrScorePolling = null;
+
+    async function pollArrTrain() {
+      const st = document.getElementById('ai_status');
+      const btn = document.getElementById('arrTrainBtn');
+      try {
+        const r = await fetch('/arrhythmia/train_status');
+        const d = await r.json();
+        if (!d) return;
+        if (d.status === 'running') {
+          if (st) st.innerText = 'Model eğitiliyor (MITDB indiriliyor/eğitiliyor)...';
+          if (btn) btn.disabled = true;
+          return;
+        }
+        if (d.status === 'done') {
+          if (st) st.innerText = 'Model hazır';
+          if (btn) btn.disabled = false;
+          if (arrTrainPolling) {
+            clearInterval(arrTrainPolling);
+            arrTrainPolling = null;
+          }
+          return;
+        }
+        if (d.status === 'error') {
+          if (st) st.innerText = 'Model hatası: ' + (d.message ?? '');
+          if (btn) btn.disabled = false;
+          if (arrTrainPolling) {
+            clearInterval(arrTrainPolling);
+            arrTrainPolling = null;
+          }
+          return;
+        }
+        if (btn) btn.disabled = false;
+      } catch (e) {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function startArrTrain() {
+      const st = document.getElementById('ai_status');
+      const btn = document.getElementById('arrTrainBtn');
+      if (st) st.innerText = 'Model eğitimi başlatılıyor...';
+      if (btn) btn.disabled = true;
+      try {
+        await fetch('/arrhythmia/train');
+        if (!arrTrainPolling) arrTrainPolling = setInterval(pollArrTrain, 1200);
+        await pollArrTrain();
+      } catch (e) {
+        if (st) st.innerText = 'Model eğitimi başlatılamadı';
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function pollArrScore() {
+      const st = document.getElementById('ai_status');
+      const modelEl = document.getElementById('ai_model');
+      const resEl = document.getElementById('ai_result');
+      const confEl = document.getElementById('ai_conf');
+      const noteEl = document.getElementById('ai_note');
+      const imgEl = document.getElementById('ai_report_img');
+      const repTitle = document.getElementById('ai_report_title');
+      const repTotal = document.getElementById('ai_report_total');
+      const repRisky = document.getElementById('ai_report_risky');
+      const repConc = document.getElementById('ai_report_conclusion');
+      const badgeEl = document.getElementById('ai_badge');
+      const gaugeEl = document.getElementById('ai_gauge');
+      const riskPctEl = document.getElementById('ai_risk_pct');
+      const totalWinEl = document.getElementById('ai_total_windows');
+      const riskyWinEl = document.getElementById('ai_risky_windows');
+      const btn = document.getElementById('arrScoreBtn');
+      try {
+        const r = await fetch('/arrhythmia/score_status');
+        const d = await r.json();
+        if (!d) return;
+        if (d.status === 'running') {
+          if (st) st.innerText = 'Anomali skoru hesaplanıyor...';
+          if (badgeEl) {
+            badgeEl.className = 'badge muted';
+            badgeEl.innerText = 'HESAPLANIYOR';
+          }
+          if (btn) btn.disabled = true;
+          return;
+        }
+        if (d.status === 'done') {
+          const out = d.result || {};
+          if (st) st.innerText = 'Hazır';
+          if (modelEl) modelEl.innerText = 'MITDB-RR-v1';
+          if (resEl) {
+            if (out.label === 'NORMAL') resEl.innerText = 'SAĞLIKLI';
+            else if (out.label === 'ANOMALY') resEl.innerText = 'RİSKLİ';
+            else resEl.innerText = 'YETERSİZ VERİ';
+          }
+          if (confEl) confEl.innerText = (out.confidence !== undefined) ? (Math.round(out.confidence * 100) + '%') : '-';
+
+          const tw = out.total_windows ?? 0;
+          const rw = out.risky_windows ?? 0;
+          const rp = out.risk_pct ?? 0;
+
+          if (totalWinEl) totalWinEl.innerText = String(tw);
+          if (riskyWinEl) riskyWinEl.innerText = String(rw);
+          if (riskPctEl) riskPctEl.innerText = `${rp.toFixed(1)}%`;
+
+          if (badgeEl) {
+            if (out.label === 'NORMAL') {
+              badgeEl.className = 'badge good';
+              badgeEl.innerText = 'STABİL';
+            } else if (out.label === 'ANOMALY') {
+              badgeEl.className = 'badge bad';
+              badgeEl.innerText = 'RİSK';
+            } else {
+              badgeEl.className = 'badge muted';
+              badgeEl.innerText = 'YETERSİZ';
+            }
+          }
+
+          if (gaugeEl) {
+            const deg = Math.max(0, Math.min(360, (rp / 100.0) * 360.0));
+            const color = (rp < 10) ? '#3cff7a' : (rp < 25) ? '#ffb703' : '#ff4964';
+            gaugeEl.style.background = `conic-gradient(${color} ${deg}deg, rgba(255,255,255,0.10) 0deg)`;
+          }
+
+          if (noteEl) {
+            if (tw > 0 && rw === 0) noteEl.innerText = '💎 SONUÇ: Kalp ritmi %100 sağlıklı ve stabil.';
+            else if (tw > 0) noteEl.innerText = `⚠️ SONUÇ: %${rp.toFixed(1)} oranında düzensizlik saptandı.`;
+            else noteEl.innerText = out.note || '';
+          }
+          if (repTitle) {
+            if (out.label === 'NORMAL') repTitle.innerText = 'Kalp ritmi sağlıklı ve stabil';
+            else if (out.label === 'ANOMALY') repTitle.innerText = 'Kalp ritminde düzensizlik riski';
+            else repTitle.innerText = 'Yetersiz veri';
+          }
+          if (repTotal) repTotal.innerText = String(out.total_windows ?? 0);
+          if (repRisky) repRisky.innerText = String(out.risky_windows ?? 0);
+          if (repConc) {
+            if (tw > 0 && rw === 0) repConc.innerText = '💎 SONUÇ: Kalp ritmi %100 sağlıklı ve stabil.';
+            else if (tw > 0) repConc.innerText = `⚠️ SONUÇ: %${(out.risk_pct ?? 0).toFixed(1)} oranında düzensizlik saptandı.`;
+            else repConc.innerText = out.note || '--';
+          }
+          if (imgEl && out.report_png) {
+            imgEl.style.display = 'block';
+            imgEl.src = '/arr_plots/' + out.report_png + '?t=' + Date.now();
+          }
+
+          // Auto switch to report tab once ready
+          if (aiTabContainer) {
+            const reportTab = aiTabContainer.querySelector('.tab[data-tab="rapor"]');
+            if (reportTab) reportTab.click();
+          }
+          if (btn) btn.disabled = false;
+          if (arrScorePolling) {
+            clearInterval(arrScorePolling);
+            arrScorePolling = null;
+          }
+          return;
+        }
+        if (d.status === 'error') {
+          if (st) st.innerText = 'Skor hatası: ' + (d.message ?? '');
+          if (btn) btn.disabled = false;
+          if (arrScorePolling) {
+            clearInterval(arrScorePolling);
+            arrScorePolling = null;
+          }
+          return;
+        }
+        if (btn) btn.disabled = false;
+      } catch (e) {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function startArrScore() {
+      const st = document.getElementById('ai_status');
+      const btn = document.getElementById('arrScoreBtn');
+      if (st) st.innerText = 'Skor başlatılıyor...';
+      if (btn) btn.disabled = true;
+      try {
+        const r = await fetch('/arrhythmia/score_latest');
+        const d = await r.json();
+        if (d?.status === 'no_data') {
+          if (st) st.innerText = 'Session verisi yok';
+          if (btn) btn.disabled = false;
+          return;
+        }
+        if (!arrScorePolling) arrScorePolling = setInterval(pollArrScore, 900);
+        await pollArrScore();
+      } catch (e) {
+        if (st) st.innerText = 'Skor başlatılamadı';
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function pollCsvAnalysis() {
+      const stEl = document.getElementById('csv_status');
+      const btn = document.getElementById('csvAnalyzeBtn');
+      try {
+        const r = await fetch('/csv_analysis/status');
+        const d = await r.json();
+        if (!d) return;
+        if (d.status === 'running') {
+          if (stEl) stEl.innerText = 'Analiz çalışıyor...';
+          if (btn) btn.disabled = true;
+          return;
+        }
+        if (d.status === 'done') {
+          if (stEl) stEl.innerText = 'Analiz tamamlandı';
+          if (btn) btn.disabled = false;
+          if (!csvImagesReady) setCsvImages(d.plots);
+          if (csvAnalysisPolling) {
+            clearInterval(csvAnalysisPolling);
+            csvAnalysisPolling = null;
+          }
+          return;
+        }
+        if (d.status === 'no_data') {
+          if (stEl) stEl.innerText = 'Veri yok (session CSV bulunamadı)';
+          if (btn) btn.disabled = false;
+          if (csvAnalysisPolling) {
+            clearInterval(csvAnalysisPolling);
+            csvAnalysisPolling = null;
+          }
+          return;
+        }
+        if (d.status === 'error') {
+          if (stEl) stEl.innerText = 'Analiz hatası: ' + (d.message ?? '');
+          if (btn) btn.disabled = false;
+          if (csvAnalysisPolling) {
+            clearInterval(csvAnalysisPolling);
+            csvAnalysisPolling = null;
+          }
+          return;
+        }
+        if (stEl) stEl.innerText = 'Analiz bekleniyor';
+        if (btn) btn.disabled = false;
+      } catch (e) {
+        if (stEl) stEl.innerText = 'Analiz durumuna erişilemiyor';
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function startCsvAnalysis() {
+      const stEl = document.getElementById('csv_status');
+      const btn = document.getElementById('csvAnalyzeBtn');
+      csvImagesReady = false;
+      if (stEl) stEl.innerText = 'Analiz başlatılıyor...';
+      if (btn) btn.disabled = true;
+      try {
+        const r = await fetch('/csv_analysis/start');
+        const d = await r.json();
+        if (d?.status === 'no_data') {
+          if (stEl) stEl.innerText = 'Veri yok (session CSV bulunamadı)';
+          if (btn) btn.disabled = false;
+          return;
+        }
+        if (!csvAnalysisPolling) {
+          csvAnalysisPolling = setInterval(pollCsvAnalysis, 800);
+        }
+        await pollCsvAnalysis();
+      } catch (e) {
+        if (stEl) stEl.innerText = 'Analiz başlatılamadı';
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    const placeholderIds = ['p2','p3','p4','p5','p6'];
+    for (const id of placeholderIds) {
+      const c = document.getElementById(id).getContext('2d');
+      new Chart(c, {
+        type: 'line',
+        data: { labels: Array(40).fill(''), datasets: [{ data: Array(40).fill(0), borderColor: 'rgba(255,255,255,0.20)', borderWidth: 1, pointRadius: 0, tension: 0.2 }] },
+        options: { scales: { y: { display:false }, x: { display:false } }, animation: false, plugins: { legend: { display: false } } }
+      });
+    }
+
+    // Tabs (Sol-alt)
+    const lbTabContainer = document.getElementById('lb_tabs');
+    if (lbTabContainer) {
+      lbTabContainer.addEventListener('click', (e) => {
+        const t = e.target;
+        if (!t.classList.contains('tab')) return;
+        const key = t.getAttribute('data-tab');
+        for (const el of lbTabContainer.querySelectorAll('.tab')) el.classList.remove('active');
+        t.classList.add('active');
+        const panes = {
+          ham: 'lb_pane_ham',
+          nabiz: 'lb_pane_nabiz',
+        };
+        for (const paneId of Object.values(panes)) document.getElementById(paneId).classList.remove('active');
+        document.getElementById(panes[key]).classList.add('active');
+      });
+    }
+
+    // Tabs (Pan-Tompkins)
+    const tabContainer = document.getElementById('pt_tabs');
+    if (tabContainer) {
+      tabContainer.addEventListener('click', (e) => {
+        const t = e.target;
+        if (!t.classList.contains('tab')) return;
+        const key = t.getAttribute('data-tab');
+        for (const el of tabContainer.querySelectorAll('.tab')) el.classList.remove('active');
+        t.classList.add('active');
+        const panes = {
+          detrended: 'pt_pane_detrended',
+          filtered: 'pt_pane_filtered',
+          derivative: 'pt_pane_derivative',
+          squared: 'pt_pane_squared',
+          integrated: 'pt_pane_integrated',
+          final: 'pt_pane_final',
+        };
+        for (const paneId of Object.values(panes)) document.getElementById(paneId).classList.remove('active');
+        document.getElementById(panes[key]).classList.add('active');
+      });
+    }
+
+    function pct(value, total) {
+      if (value === null || value === undefined) return 0;
+      return Math.min(100, Math.max(0, (1 - (value / total)) * 100));
+    }
+
+    let doneAt = null;
+    let rawLoaded = false;
+
+    function loadRawOnce() {
+      if (rawLoaded) return;
+      rawLoaded = true;
+    }
+
+    async function tick() {
+      try {
+        const r = await fetch('/status');
+        const d = await r.json();
+
+        document.getElementById('status').innerText = d.message || '';
+        document.getElementById('ir').innerText = d.ir ?? 0;
+        document.getElementById('red').innerText = d.red ?? 0;
+        document.getElementById('bpm').innerText = (d.bpm ?? '-')
+        document.getElementById('bpm_avg').innerText = (d.bpm_avg ?? '--')
+        document.getElementById('settle').innerText = (d.settling_sec ?? '-')
+        document.getElementById('samples').innerText = d.samples_written ?? 0;
+        document.getElementById('out').innerText = d.output_path ?? '-';
+        document.getElementById('nabiz').innerText = d.nabiz_path ?? '-';
+
+        const fill = document.getElementById('fill');
+        const main = document.getElementById('main');
+        const sub = document.getElementById('sub');
+
+        if (d.phase === 'CALIBRATION') {
+          main.innerText = Math.ceil(d.remaining ?? 0);
+          sub.innerText = 'Kalibrasyon (kayıt yok) • Nabız: ' + (d.bpm ?? '-') ;
+          fill.style.width = pct(d.remaining, 5.0) + '%';
+        } else if (d.phase === 'STABILIZING') {
+          main.innerText = '--';
+          sub.innerText = 'Sinyal oturuyor • Nabız: ' + (d.bpm ?? '-') ;
+          fill.style.width = '0%';
+        } else if (d.phase === 'RECORDING') {
+          main.innerText = Math.ceil(d.remaining ?? 0);
+          sub.innerText = 'Kayıt (saniye kaldı) • Nabız: ' + (d.bpm ?? '-') ;
+          fill.style.width = pct(d.remaining, 60.0) + '%';
+        } else if (d.phase === 'DONE') {
+          main.innerText = 'OK';
+          if (doneAt === null) doneAt = Date.now();
+          const dt = Date.now() - doneAt;
+          if (dt >= 5000) {
+            sub.innerText = 'Ham veriler hazırlanıyor • ' + (d.output_path ?? '-');
+            loadRawOnce();
+          } else {
+            sub.innerText = 'Kayıt tamamlandı • Parmağınızı sensörden çekiniz';
+          }
+          fill.style.width = '100%';
+        } else if (d.phase === 'ERROR') {
+          main.innerText = 'ERR';
+          sub.innerText = 'Hata';
+          fill.style.width = '0%';
+        } else {
+          doneAt = null;
+          rawLoaded = false;
+          main.innerText = '--';
+          sub.innerText = 'Parmak bekleniyor';
+          fill.style.width = '0%';
+        }
+      } catch (e) {
+        document.getElementById('status').innerText = 'Bağlantı yok';
+      }
+    }
+
+    async function runPanTompkins() {
+      const statusEl = document.getElementById('pt_status');
+      statusEl.innerText = 'Analiz çalışıyor...';
+      try {
+        const r = await fetch('/pan_tompkins');
+        const d = await r.json();
+        if (!d || d.status !== 'ok') {
+          statusEl.innerText = d?.message || 'Analiz başarısız';
+          return;
+        }
+        statusEl.innerText = 'Analiz tamamlandı';
+        const ts = Date.now();
+        const plots = d.plots || {};
+        const setImg = (id, url) => {
+          const el = document.getElementById(id);
+          if (!el || !url) return;
+          el.src = url + '?t=' + ts;
+        };
+        setImg('pt_img_detrended', plots.detrended);
+        setImg('pt_img_filtered', plots.filtered);
+        setImg('pt_img_derivative', plots.derivative);
+        setImg('pt_img_squared', plots.squared);
+        setImg('pt_img_integrated', plots.integrated);
+        setImg('pt_img_final', plots.final);
+
+      } catch (e) {
+        statusEl.innerText = 'Bağlantı hatası';
+      }
+    }
+
+    setInterval(tick, 150);
+    tick();
+  </script>
+</body>
+</html>
